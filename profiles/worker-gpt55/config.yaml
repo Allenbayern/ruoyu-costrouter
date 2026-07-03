@@ -1,0 +1,12 @@
+# Example worker profile for ruoyu-costrouter.
+# Copy to ~/.hermes/profiles/{name}/config.yaml and replace placeholders.
+
+model:
+  provider: custom:CHANGE_ME
+  default: gpt-5.5
+
+providers:
+  custom:CHANGE_ME:
+    base_url: https://api.example.com/v1
+    api_key: ${CHANGE_ME_API_KEY}
+    api_mode: chat_completions
