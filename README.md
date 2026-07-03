@@ -1,53 +1,100 @@
 # ruoyu-costrouter
 
-`ruoyu-costrouter` packages the Hermes `cost_router` delegation tool so another Hermes user can reproduce a routing-first multi-model setup.
+Hermes 多模型路由工具包：把一个主控模型（controller）和多个 worker profile 组织起来，让 Hermes 可以通过 `cost_router(...)` 把不同类型的任务分发给不同模型。
 
-The tool adds a model-facing `cost_router(...)` function that routes a subtask through a named Hermes worker profile, reads that profile's `config.yaml`, resolves provider/model credentials, and then dispatches through Hermes' existing `delegate_task` runtime.
+This repository packages a Hermes `cost_router` integration so other Hermes users can reproduce a routing-first multi-model setup.
 
-## What it is
+## 适合谁用
 
-- A small Hermes core patch for the agent-loop tool path.
-- Worker profile templates for common routing lanes.
-- Install and uninstall scripts that apply or reverse the patch against a local Hermes checkout.
-- Usage examples and verification commands.
+如果你希望在 Hermes 里这样工作：
 
-## Why this is a patch, not a pure plugin
+- 主模型只负责拆任务、审核结果、做最终判断；
+- 低成本模型处理粗筛、聚类、表格、字段抽取；
+- 强模型处理技术判断、复杂压缩、关键推理；
+- 写作模型处理中文润色、成稿、改写；
+- 所有 worker 都通过独立 Hermes profile 配置 provider/model；
 
-`cost_router` must call `delegate_task` with the live `parent_agent` object. In current Hermes, that object is available only inside the agent loop, so the tool needs three core integration points:
+那这个仓库就是给你用的。
 
-1. register `cost_router` in `tools/delegate_tool.py`;
-2. dispatch it through `AIAgent._dispatch_cost_router(...)` in `run_agent.py`;
-3. route agent-loop execution through the same middleware path as `delegate_task`.
+## 它做了什么
 
-Until Hermes exposes a stable third-party API for agent-loop tools that need `parent_agent`, this repo installs as a reproducible patch bundle.
+安装后，Hermes 会多一个面向模型可调用的工具：`cost_router`。
 
-## Requirements
+`cost_router` 会：
 
-- macOS or Linux shell environment.
-- A local Hermes Agent source checkout.
-- Python 3.11+.
-- `git` available on `PATH`.
-- Worker profiles under `<HERMES_HOME>/profiles/<worker>/config.yaml`.
+1. 接收 `profile`、`goal`、`context` 或 `tasks`；
+2. 读取 `<HERMES_HOME>/profiles/<profile>/config.yaml`；
+3. 解析该 worker profile 的 provider、model、base_url、api_mode、api_key；
+4. 把任务交给 Hermes 原生 `delegate_task` 运行时执行；
+5. 让主控模型拿回 worker 的结构化结果，再做最终判断。
 
-## Quick install
+## 重要说明：为什么是 patch 包
+
+当前 Hermes 的 `delegate_task` 需要 live `parent_agent` 对象，而普通第三方工具无法稳定拿到这个对象。
+
+所以本仓库不是伪装成“纯插件”，而是一个可复现的 Hermes core patch 包。它会补齐这些集成点：
+
+- `tools/delegate_tool.py`：注册 `cost_router` schema 和 handler；
+- `run_agent.py`：增加 `AIAgent._dispatch_cost_router(...)`；
+- `agent/agent_runtime_helpers.py`：让 agent-loop 工具路径支持 `cost_router`；
+- `agent/tool_executor.py`：让顺序工具执行器正确展示和调度 `cost_router`；
+- `toolsets.py` / `model_tools.py`：把 `cost_router` 暴露到 delegation 相关 toolset。
+
+等 Hermes 未来提供稳定的 agent-loop 第三方工具 API 后，这个仓库可以再改成纯插件形态。
+
+## 仓库内容
+
+```text
+.
+├── README.md
+├── examples/
+│   └── controller-policy.md
+├── patches/
+│   └── cost-router.patch
+├── profiles/
+│   ├── worker-dsflash/config.yaml
+│   ├── worker-dspro/config.yaml
+│   ├── worker-gpt54/config.yaml
+│   └── worker-gpt55/config.yaml
+└── scripts/
+    ├── install.sh
+    └── uninstall.sh
+```
+
+## 安装
+
+先 clone 本仓库：
 
 ```bash
 git clone https://github.com/Allenbayern/ruoyu-costrouter.git
 cd ruoyu-costrouter
+```
+
+对你的 Hermes Agent 源码目录应用 patch：
+
+```bash
 ./scripts/install.sh /path/to/hermes-agent
 ```
 
-If your Hermes checkout is the default source install, this is often:
+如果你使用默认源码安装位置，通常是：
 
 ```bash
 ./scripts/install.sh ~/.hermes/hermes-agent
 ```
 
-The installer creates a best-effort backup branch named `ruoyu-costrouter-backup-<timestamp>` before applying the patch.
+安装脚本会：
 
-## Configure worker profiles
+- 检查目标目录是不是 git checkout；
+- 检查 Hermes 关键文件是否存在；
+- 创建一个备份分支 `ruoyu-costrouter-backup-<timestamp>`；
+- 先执行 `git apply --check`，确认 patch 可应用；
+- 再正式应用 `patches/cost-router.patch`。
 
-Copy the templates you need:
+## 配置 worker profiles
+
+模板路径示例：`profiles/worker-dsflash/config.yaml`。
+
+复制模板到 Hermes profiles 目录：
 
 ```bash
 mkdir -p ~/.hermes/profiles
@@ -57,22 +104,25 @@ cp -R profiles/worker-gpt54 ~/.hermes/profiles/
 cp -R profiles/worker-gpt55 ~/.hermes/profiles/
 ```
 
-Then edit each `config.yaml` to use your actual provider, model, API base URL, and secret source.
+然后编辑每个 `config.yaml`，换成你自己的 provider、model、base_url 和 API key 来源。
 
-Do not commit real API keys. Prefer environment variables or your existing Hermes provider configuration.
+模板里不会包含真实 key。建议使用环境变量或你现有 Hermes provider 配置，不要把真实密钥提交到 git。
 
-## Example controller policy
+## 推荐路由策略
 
-Use `examples/controller-policy.md` as a system/developer-policy snippet. It maps task classes to worker profiles:
+可以参考 `examples/controller-policy.md`。
 
-- `worker-dsflash`: rough filtering, clustering, table/checklist extraction.
-- `worker-dspro`: bounded technical analysis and narrow source judgment.
-- `worker-gpt54`: high-quality prose drafts and Chinese rewrites.
-- `worker-gpt55`: hard execution slices that need top-tier reasoning.
+一个常见分工是：
 
-## Tool call shape
+- `worker-dsflash`：粗筛、日志聚类、低价值预处理、表格/清单/字段抽取；
+- `worker-dspro`：窄范围技术分析、复杂压缩、局部源码判断；
+- `worker-gpt54`：中文草稿、润色、改写、面向用户的高质量文案；
+- `worker-gpt55`：需要顶级推理能力的困难执行切片；
+- controller：保留最终判断权，负责风险、阻塞、发布、配置变更和最终回复。
 
-Single task:
+## 使用示例
+
+单个任务：
 
 ```json
 {
@@ -83,44 +133,71 @@ Single task:
 }
 ```
 
-Batch tasks through the same worker profile:
+批量任务：
 
 ```json
 {
   "profile": "worker-dsflash",
   "tasks": [
-    {"goal": "Cluster these warnings", "context": "Paste or reference logs."},
-    {"goal": "Extract fields into a checklist", "context": "Paste source text."}
+    {
+      "goal": "Cluster these warnings",
+      "context": "Paste or reference logs. Return grouped causes and counts."
+    },
+    {
+      "goal": "Extract fields into a checklist",
+      "context": "Paste source text. Return a compact checklist only."
+    }
   ]
 }
 ```
 
-## Verify after install
+## 验证安装
 
-From the Hermes checkout:
+在 Hermes Agent 源码目录里运行：
 
 ```bash
 python -m pytest tests/tools/test_delegate.py::TestCostRouter -q
 python -m pytest tests/run_agent/test_run_agent.py -k cost_router -q
 ```
 
-If this Hermes checkout uses a project test runner, use that runner instead of raw `pytest`.
+如果你的 Hermes checkout 有自己的测试入口，请优先使用项目内测试脚本。
 
-## Uninstall
+本仓库整理时已在干净 Hermes worktree 上验证过：
+
+- `scripts/install.sh` 可应用 patch；
+- patch 后相关 Python 文件可 `py_compile`；
+- focused tests 通过：`8 passed, 463 deselected`；
+- `scripts/uninstall.sh` 可逆卸载，卸载后 `git diff --quiet` 通过。
+
+## 卸载
 
 ```bash
 ./scripts/uninstall.sh /path/to/hermes-agent
 ```
 
-This reverses `patches/cost-router.patch` with `git apply -R`.
+卸载脚本会用 `git apply -R` 反向撤销 `patches/cost-router.patch`。
 
-## Security notes
+## 安全说明
 
-- The tool never asks the model to pass provider credentials directly.
-- Runtime credential values are resolved from named worker profile config.
-- Keep `profiles/*/config.yaml` templates free of real secrets.
-- Review `git diff` before committing an installed Hermes checkout.
+- 不要在 prompt 或工具参数里直接传 API key；
+- `cost_router` 只接收 worker profile 名称，不接收 provider 密钥；
+- 真实凭据应由 Hermes profile/provider 配置解析；
+- 提交前请运行 `git diff`，确认没有把本地密钥、`.env`、token 写入仓库。
 
-## Status
+## English summary
 
-This package targets Hermes builds whose delegation implementation is structurally compatible with the included patch. If the patch fails, inspect the rejected hunks and port the same integration points manually.
+`ruoyu-costrouter` adds a Hermes `cost_router(...)` tool that routes delegated subtasks through named worker profiles. It reads each worker profile's Hermes config, resolves model/provider settings, and dispatches through the existing `delegate_task` runtime.
+
+Because current Hermes requires live `parent_agent` state for delegation, this repository ships as a reproducible core patch bundle rather than a pure third-party plugin.
+
+Quick start:
+
+```bash
+git clone https://github.com/Allenbayern/ruoyu-costrouter.git
+cd ruoyu-costrouter
+./scripts/install.sh ~/.hermes/hermes-agent
+mkdir -p ~/.hermes/profiles
+cp -R profiles/worker-* ~/.hermes/profiles/
+```
+
+Then edit each copied `config.yaml` for your own providers and models.
