@@ -1,46 +1,37 @@
 # ruoyu-costrouter
 
-Hermes 多模型路由工具包：把一个主控模型（controller）和多个 worker profile 组织起来，让 Hermes 可以通过 `cost_router(...)` 把不同类型的任务分发给不同模型。
+Hermes `cost_router` runtime patch 包：把已经注册在 Hermes delegation 工具集里的 `cost_router(...)` 走通 agent runtime、post-hook 和并发工具执行路径。
 
-This repository packages a Hermes `cost_router` integration so other Hermes users can reproduce a routing-first multi-model setup.
+This repository packages the latest runtime integration patch from `Allenbayern/hermes-agent:fix/cost-router-concurrent-runtime` / `NousResearch/hermes-agent#58314` so it can be reproduced on a clean Hermes checkout.
 
 ## 适合谁用
 
 如果你希望在 Hermes 里这样工作：
 
-- 主模型只负责拆任务、审核结果、做最终判断；
-- 低成本模型处理粗筛、聚类、表格、字段抽取；
-- 强模型处理技术判断、复杂压缩、关键推理；
-- 写作模型处理中文润色、成稿、改写；
-- 所有 worker 都通过独立 Hermes profile 配置 provider/model；
+- controller 负责拆任务、审核结果、做最终判断；
+- `cost_router(...)` 像 `delegate_task(...)` 一样拿到 live `parent_agent`；
+- batch 里同时出现 `cost_router` 和其他并发安全工具时，不被迫降级到顺序路径；
+- subagent / background delegation 的状态、post-hook、session flush 行为保持和 Hermes 原生 runtime 一致；
 
 那这个仓库就是给你用的。
 
-## 它做了什么
+## 当前版本做了什么
 
-安装后，Hermes 会多一个面向模型可调用的工具：`cost_router`。
+安装后，patch 会补齐这些集成点：
 
-`cost_router` 会：
+1. `agent/agent_runtime_helpers.py`
+   - 把 `cost_router` 加入 agent-runtime post-hook ownership；
+   - 在 runtime helper 路径里用 live `parent_agent` 调用 `_handle_cost_router(...)`。
+2. `agent/tool_dispatch_helpers.py`
+   - 把 `cost_router` 标记为 batch 并发安全工具。
+3. `agent/tool_executor.py`
+   - 在顺序工具执行路径里特殊处理 `cost_router`，保证它不走普通 registry fallback，而是拿到 live `parent_agent`。
+4. `tools/delegate_tool.py`
+   - 增加 `_handle_cost_router(...)`，复用 `delegate_task(...)` 的 runtime-aware delegation 行为。
+5. `tests/run_agent/test_run_agent.py`
+   - 增加 focused regression tests，覆盖 batch concurrent path 和 parent-agent 注入。
 
-1. 接收 `profile`、`goal`、`context` 或 `tasks`；
-2. 读取 `<HERMES_HOME>/profiles/<profile>/config.yaml`；
-3. 解析该 worker profile 的 provider、model、base_url、api_mode、api_key；
-4. 把任务交给 Hermes 原生 `delegate_task` 运行时执行；
-5. 让主控模型拿回 worker 的结构化结果，再做最终判断。
-
-## 重要说明：为什么是 patch 包
-
-当前 Hermes 的 `delegate_task` 需要 live `parent_agent` 对象，而普通第三方工具无法稳定拿到这个对象。
-
-所以本仓库不是伪装成“纯插件”，而是一个可复现的 Hermes core patch 包。它会补齐这些集成点：
-
-- `tools/delegate_tool.py`：注册 `cost_router` schema 和 handler；
-- `run_agent.py`：增加 `AIAgent._dispatch_cost_router(...)`；
-- `agent/agent_runtime_helpers.py`：让 agent-loop 工具路径支持 `cost_router`；
-- `agent/tool_executor.py`：让顺序工具执行器正确展示和调度 `cost_router`；
-- `toolsets.py` / `model_tools.py`：把 `cost_router` 暴露到 delegation 相关 toolset。
-
-等 Hermes 未来提供稳定的 agent-loop 第三方工具 API 后，这个仓库可以再改成纯插件形态。
+> 注意：当前最新 patch 假设 Hermes 主线已经有 `cost_router` schema / toolset 注册基础。这个包不再携带旧版“从 worker profile 解析 provider/model/api_key”的完整实现；它只同步最新 runtime 修复。
 
 ## 仓库内容
 
@@ -60,6 +51,8 @@ This repository packages a Hermes `cost_router` integration so other Hermes user
     ├── install.sh
     └── uninstall.sh
 ```
+
+`profiles/` 和 `examples/` 保留为 controller / worker routing 配置参考；本 patch 本身不读取或安装这些 profile。
 
 ## 安装
 
@@ -126,7 +119,6 @@ cp -R profiles/worker-gpt55 ~/.hermes/profiles/
 
 ```json
 {
-  "profile": "worker-dspro",
   "goal": "Inspect this module and identify the narrow root cause.",
   "context": "Include file paths, constraints, observed errors, and requested output shape.",
   "role": "leaf"
@@ -137,7 +129,6 @@ cp -R profiles/worker-gpt55 ~/.hermes/profiles/
 
 ```json
 {
-  "profile": "worker-dsflash",
   "tasks": [
     {
       "goal": "Cluster these warnings",
@@ -156,17 +147,16 @@ cp -R profiles/worker-gpt55 ~/.hermes/profiles/
 在 Hermes Agent 源码目录里运行：
 
 ```bash
-python -m pytest tests/tools/test_delegate.py::TestCostRouter -q
 python -m pytest tests/run_agent/test_run_agent.py -k cost_router -q
 ```
 
 如果你的 Hermes checkout 有自己的测试入口，请优先使用项目内测试脚本。
 
-本仓库整理时已在干净 Hermes worktree 上验证过：
+本仓库更新时已在干净 Hermes worktree 上验证过：
 
 - `scripts/install.sh` 可应用 patch；
 - patch 后相关 Python 文件可 `py_compile`；
-- focused tests 通过：`8 passed, 463 deselected`；
+- focused test command 可启动执行；
 - `scripts/uninstall.sh` 可逆卸载，卸载后 `git diff --quiet` 通过。
 
 ## 卸载
@@ -180,15 +170,12 @@ python -m pytest tests/run_agent/test_run_agent.py -k cost_router -q
 ## 安全说明
 
 - 不要在 prompt 或工具参数里直接传 API key；
-- `cost_router` 只接收 worker profile 名称，不接收 provider 密钥；
-- 真实凭据应由 Hermes profile/provider 配置解析；
-- 提交前请运行 `git diff`，确认没有把本地密钥、`.env`、token 写入仓库。
+- 不要把真实 profile 配置、`.env`、token 或 credential 文件提交到本仓库；
+- 提交前请运行 `git diff`，确认没有把本地密钥写入仓库。
 
 ## English summary
 
-`ruoyu-costrouter` adds a Hermes `cost_router(...)` tool that routes delegated subtasks through named worker profiles. It reads each worker profile's Hermes config, resolves model/provider settings, and dispatches through the existing `delegate_task` runtime.
-
-Because current Hermes requires live `parent_agent` state for delegation, this repository ships as a reproducible core patch bundle rather than a pure third-party plugin.
+`ruoyu-costrouter` packages the latest Hermes `cost_router(...)` runtime patch. It routes `cost_router` through the same live-agent delegation path as `delegate_task`, allows concurrent tool batches that include `cost_router`, and preserves parent-agent context for runtime hooks.
 
 Quick start:
 
@@ -200,4 +187,4 @@ mkdir -p ~/.hermes/profiles
 cp -R profiles/worker-* ~/.hermes/profiles/
 ```
 
-Then edit each copied `config.yaml` for your own providers and models.
+Then edit each copied `config.yaml` for your own providers and models if your Hermes setup uses worker profiles.
