@@ -1,0 +1,39 @@
+# Merge deliberately into the operator's config.yaml; this plugin does not write config.
+plugins:
+  enabled:
+    - ruoyu-cost-router
+  entries:
+    ruoyu-cost-router:
+      llm:
+        # Missing, empty, wildcard, malformed, or unknown values deny every override.
+        # The plugin checks these lists before invoking ctx.llm.complete.
+        allow_provider_override: true
+        allowed_providers:
+          - custom
+          - deepseek
+        allow_model_override: true
+        allowed_models:
+          - gpt-5.6-luna
+          - deepseek-v4-flash
+          - gpt-5.6-terra
+          - gpt-5.6-sol
+        allow_agent_id_override: false
+        allow_profile_override: false
+      routes:
+        # Routes may only enable/disable their fixed pair; they cannot retarget it.
+        luna:
+          enabled: true
+          provider: custom
+          model: gpt-5.6-luna
+        luna_economy:
+          enabled: true
+          provider: deepseek
+          model: deepseek-v4-flash
+        terra:
+          enabled: true
+          provider: custom
+          model: gpt-5.6-terra
+        sol:
+          enabled: true
+          provider: custom
+          model: gpt-5.6-sol

@@ -1,0 +1,6 @@
+name: ruoyu-cost-router
+version: 0.1.0
+description: "Private controller-first routing tool using host-owned plugin LLM access."
+author: Private local delivery
+provides_tools:
+  - ruoyu_cost_router
