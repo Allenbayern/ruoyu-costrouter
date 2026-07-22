@@ -1,39 +1,31 @@
 # ruoyu-cost-router release layout
 
-This directory is the prepared standalone repository root for the private
-`ruoyu-cost-router` plugin. It is intentionally an untracked task artifact:
-it is not an edit to Hermes Core and it has not been installed, configured,
-committed, pushed, or published.
+This is the standalone repository root for the private `ruoyu-cost-router`
+plugin. Installation and runtime configuration are operator-controlled; this
+repository contains no credentials and does not modify Hermes Core.
 
 ## Contents
 
-- `ruoyu-cost-router/` — the installable plugin directory. Copy this directory
-  as `~/.hermes/plugins/ruoyu-cost-router` only after controller approval.
-- `tests/test_ruoyu_cost_router.py` — isolated verification. It copies the
-  installable directory into a temporary `HERMES_HOME` before plugin discovery.
+- `ruoyu-cost-router/`: installable plugin directory.
+- `tests/`: standalone router-to-Kanban submission contract tests.
+- `pyproject.toml`: package metadata and test dependency range.
+- `scripts/run_tests.sh`: reproducible test entry point.
 
-## Prepared release boundary
-
-If a controller later chooses to publish the separate repository, publish the
-**contents of this directory** as that repository's root. That produces this
-layout:
-
-```text
-ruoyu-cost-router/
-  __init__.py
-  plugin.yaml
-  config.template.yaml
-  README.md
-tests/
-  test_ruoyu_cost_router.py
-```
-
-In that separate repository, execute the focused verification from its root:
+## Validation After Clone
 
 ```sh
-scripts/run_tests.sh tests/test_ruoyu_cost_router.py
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e '.[test]'
+scripts/run_tests.sh
 ```
 
-No obsolete core patch or profile-template material belongs in this release
-layout. Controller retains every install, configuration, remote repository,
-unarchive, publication, merge, and acceptance decision.
+Tests do not need a Hermes Core checkout. They validate that a selected route
+creates a `kanban_create` request for the bound worker profile and workspace,
+not a bare model call. A real installation requires a running Kanban dispatcher
+and configured `worker-luna`, `worker-luna-economy`, `worker-terra`, and
+`worker-sol` profiles; inspect the resulting task ID, worker runs, and logs to
+verify actual execution.
+
+Controller retains install, configuration, remote repository, publication,
+merge, and acceptance decisions.

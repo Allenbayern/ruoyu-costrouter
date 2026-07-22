@@ -1,39 +1,59 @@
-# Merge deliberately into the operator's config.yaml; this plugin does not write config.
+# Merge deliberately into the operator's config.yaml; this plugin never writes config.
 plugins:
   enabled:
     - ruoyu-cost-router
   entries:
     ruoyu-cost-router:
+      # Versioned catalog permits provider/model migrations without code changes.
+      # Unknown/missing versions and malformed catalogs fail closed.
+      catalog_version: 2
       llm:
-        # Missing, empty, wildcard, malformed, or unknown values deny every override.
-        # The plugin checks these lists before invoking ctx.llm.complete.
+        # Both narrow allowlists are required before a host-owned call.
         allow_provider_override: true
-        allowed_providers:
-          - custom
-          - deepseek
+        allowed_providers: [custom, deepseek]
         allow_model_override: true
-        allowed_models:
-          - gpt-5.6-luna
-          - deepseek-v4-flash
-          - gpt-5.6-terra
-          - gpt-5.6-sol
+        allowed_models: [gpt-5.6-luna, deepseek-v4-flash, gpt-5.6-terra, gpt-5.6-sol]
         allow_agent_id_override: false
         allow_profile_override: false
       routes:
-        # Routes may only enable/disable their fixed pair; they cannot retarget it.
         luna:
           enabled: true
           provider: custom
           model: gpt-5.6-luna
+          worker_profile: worker-luna
+          pricing: {input_per_million_usd: 0.20, output_per_million_usd: 0.80}
+          max_output_tokens: 1000
+          budget_fallbacks: []
         luna_economy:
           enabled: true
           provider: deepseek
           model: deepseek-v4-flash
+          worker_profile: worker-luna-economy
+          pricing: {input_per_million_usd: 0.10, output_per_million_usd: 0.40}
+          max_output_tokens: 1500
+          budget_fallbacks: [luna]
         terra:
           enabled: true
           provider: custom
           model: gpt-5.6-terra
+          worker_profile: worker-terra
+          pricing: {input_per_million_usd: 2.00, output_per_million_usd: 8.00}
+          max_output_tokens: 2500
+          budget_fallbacks: [luna_economy, luna]
         sol:
           enabled: true
           provider: custom
           model: gpt-5.6-sol
+          worker_profile: worker-sol
+          pricing: {input_per_million_usd: 5.00, output_per_million_usd: 20.00}
+          max_output_tokens: 3000
+          budget_fallbacks: [terra, luna_economy, luna]
+      # Budget limits may be supplied per call and override these defaults.
+      budget:
+        max_cost_usd: 0.10
+        max_tokens: 6000
+        remaining_budget_usd: 1.00
+      routing:
+        # Disabled by default: free text must not silently select a more costly tier.
+        keyword_fallback_enabled: false
+        keyword_tiers: {}
