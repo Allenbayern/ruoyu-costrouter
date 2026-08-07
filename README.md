@@ -1,5 +1,7 @@
 # ruoyu-costrouter — standalone release repository
 
+[English](README.md) | [中文](README.zh-CN.md)
+
 Standalone repository root for the private **ruoyu-cost-router** Hermes plugin
 (flat catalog **v5**, version 0.4.0). Installation and runtime configuration
 are operator-controlled; this repository contains no credentials and does not
